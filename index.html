@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>COVID-19 SIR Model Simulator</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.7.1/chart.min.js"></script>
+    <style>
+        :root {
+            --primary-color: #2196F3;
+            --danger-color: #f44336;
+            --success-color: #4CAF50;
+        }
+        
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .input-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .input-group {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+        }
+
+        .input-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        button {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        button:hover {
+            opacity: 0.9;
+        }
+
+        .error {
+            color: var(--danger-color);
+            margin-top: 10px;
+            display: none;
+        }
+
+        .info-text {
+            color: #666;
+            font-size: 0.9em;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Epidemic Spread Simulator (SIR Model)</h1>
+        <p class="info-text">This simulator uses the SIR (Susceptible, Infected, Recovered) model to visualize disease spread.</p>
+        
+        <div class="input-container">
+            <div class="input-group">
+                <label for="population">Total Population:</label>
+                <input type="number" id="population" min="1000" value="1000000">
+                <div class="info-text">Total number of people in the population</div>
+            </div>
+            <div class="input-group">
+                <label for="r0">R0 (Basic Reproduction Number):</label>
+                <input type="number" id="r0" min="0" step="0.1" value="2.5">
+                <div class="info-text">Average number of people an infected person will infect</div>
+            </div>
+            <div class="input-group">
+                <label for="ifr">Infection Fatality Rate (%):</label>
+                <input type="number" id="ifr" min="0" max="100" step="0.1" value="1">
+                <div class="info-text">Percentage of infected people who die</div>
+            </div>
+            <div class="input-group">
+                <label for="days">Number of Days:</label>
+                <input type="number" id="days" min="1" max="100" value="30">
+                <div class="info-text">Number of days to simulate</div>
+            </div>
+            <div class="input-group">
+                <label for="initialInfected">Initial Infected:</label>
+                <input type="number" id="initialInfected" min="1" value="100">
+                <div class="info-text">Number of people initially infected</div>
+            </div>
+        </div>
+
+        <div id="error" class="error"></div>
+        <button onclick="updateChart()">Run Simulation</button>
+        
+        <div id="chartContainer">
+            <canvas id="myChart"></canvas>
+        </div>
+    </div>
+
+    <script>
+        let myChart;
+
+        function validateInputs() {
+            const population = parseInt(document.getElementById('population').value);
+            const initialInfected = parseInt(document.getElementById('initialInfected').value);
+            const error = document.getElementById('error');
+
+            if (initialInfected > population) {
+                error.textContent = "Initial infected cannot exceed total population";
+                error.style.display = "block";
+                return false;
+            }
+            
+            error.style.display = "none";
+            return true;
+        }
+
+        function simulateSpread(r0, ifr, days, initialInfected, population) {
+            // Calculate beta (transmission rate) and gamma (recovery rate)
+            const gamma = 1/14;  // Recovery rate (1/average infection duration)
+            const beta = r0 * gamma;  // Transmission rate derived from R0
+            
+            let data = [{
+                susceptible: population - initialInfected,
+                infected: initialInfected,
+                recovered: 0,
+                fatalities: 0,
+                dailyNewCases: initialInfected  // Track new cases
+            }];
+            
+            for (let i = 1; i < days; i++) {
+                const prev = data[i-1];
+                
+                // SIR differential equations (using discrete time steps)
+                const newInfections = Math.round(
+                    beta * prev.infected * prev.susceptible / population
+                );
+                const newRecovered = Math.round(gamma * prev.infected);
+                const newFatalities = Math.round(newInfections * ifr);
+                
+                // Ensure we don't exceed population constraints
+                const susceptible = Math.max(0, prev.susceptible - newInfections);
+                const infected = Math.max(0, 
+                    prev.infected + newInfections - newRecovered - newFatalities
+                );
+                const recovered = prev.recovered + newRecovered;
+                const fatalities = prev.fatalities + newFatalities;
+                
+                data.push({
+                    susceptible,
+                    infected,
+                    recovered,
+                    fatalities,
+                    dailyNewCases: newInfections,
+                    r_effective: (beta * susceptible / population) / gamma // Track R_effective
+                });
+            }
+
+            return data;
+        }
+
+        function updateChart() {
+            if (!validateInputs()) return;
+
+            const r0 = parseFloat(document.getElementById('r0').value);
+            const ifr = parseFloat(document.getElementById('ifr').value) / 100;
+            const days = parseInt(document.getElementById('days').value);
+            const initialInfected = parseInt(document.getElementById('initialInfected').value);
+            const population = parseInt(document.getElementById('population').value);
+            
+            const data = simulateSpread(r0, ifr, days, initialInfected, population);
+
+            if (myChart) {
+                myChart.destroy();
+            }
+
+            const ctx = document.getElementById('myChart').getContext('2d');
+            myChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.map((_, index) => `Day ${index + 1}`),
+                    datasets: [
+                        {
+                            label: 'Susceptible',
+                            data: data.map(d => d.susceptible),
+                            borderColor: '#2196F3',
+                            tension: 0.1,
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: 'Infected',
+                            data: data.map(d => d.infected),
+                            borderColor: '#f44336',
+                            tension: 0.1,
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: 'Recovered',
+                            data: data.map(d => d.recovered),
+                            borderColor: '#4CAF50',
+                            tension: 0.1,
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: 'Daily New Cases',
+                            data: data.map(d => d.dailyNewCases),
+                            borderColor: '#FF9800',
+                            tension: 0.1,
+                            yAxisID: 'y2',
+                            hidden: true
+                        },
+                        {
+                            label: 'R_effective',
+                            data: data.map(d => d.r_effective),
+                            borderColor: '#9C27B0',
+                            tension: 0.1,
+                            yAxisID: 'y3',
+                            hidden: true
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Number of People'
+                            },
+                            position: 'left'
+                        },
+                        y2: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Daily New Cases'
+                            },
+                            position: 'right',
+                            grid: {
+                                drawOnChartArea: false
+                            }
+                        },
+                        y3: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'R_effective'
+                            },
+                            position: 'right',
+                            grid: {
+                                drawOnChartArea: false
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Initial chart render
+        updateChart();
+    </script>
+</body>
+</html>
